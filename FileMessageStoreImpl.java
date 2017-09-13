@@ -86,7 +86,7 @@ public class FileMessageStoreImpl implements MessageStore {
             //Number of keys will be defined through the buffer size
             options.writeBufferSize(512 * kb);
             options.createIfMissing(true);
-            brokerStore = factory.open(new File("mbstore"), options);
+            brokerStore = factory.open(new File("/home/wishmitha/mbstore"), options);
             brokerStore.put(FileStoreConstants.LAST_MESSAGE_ID.getBytes(),"1".getBytes());
             brokerStore.put(FileStoreConstants.DLC_MESSAGE_COUNT.getBytes(),"0".getBytes());
         } catch (IOException e) {
@@ -141,7 +141,7 @@ public class FileMessageStoreImpl implements MessageStore {
                 while (keyIterator.hasNext()){
 
                     String key = asString(keyIterator.peekNext().getKey());
-                    String[] keySplit = key.split("\\.");
+                    String[] keySplit = key.split(FileStoreConstants.CONNECTOR);
                     Long currentID = Long.parseLong(keySplit[1]);
                     String identifier = keySplit[keySplit.length-1];
 
@@ -358,13 +358,6 @@ public class FileMessageStoreImpl implements MessageStore {
     }
 
     // added
-    private void setLastQueueID(Transaction tx) {
-
-        tx.put(FileStoreConstants.LAST_QUEUE_ID.getBytes(),Long.toString(this.lastQueueID).getBytes());
-
-    }
-
-    // added
     private String getQueueID(String queueName) {
 
         String queueIDIdentifier = generateKey(FileStoreConstants.QUEUE_ID,FileStoreConstants.QUEUE, queueName);
@@ -378,6 +371,11 @@ public class FileMessageStoreImpl implements MessageStore {
         return queueID;
     }
 
+    //added
+    private String getQueueName(long queueID){
+        String queueNameIdentifier = generateKey(FileStoreConstants.QUEUE_NAME,FileStoreConstants.QUEUE,Long.toString(queueID));
+        return asString(brokerStore.get(queueNameIdentifier.getBytes()));
+    }
 
     @Override //(Implemented)
     public void moveMetadataToQueue(long messageId, String currentQueueName, String targetQueueName) throws AndesException {
@@ -396,7 +394,9 @@ public class FileMessageStoreImpl implements MessageStore {
             // add message to the target queue
             String messageMetaDataIdentifier = generateKey(FileStoreConstants.MESSAGE_METADA,FileStoreConstants.MESSAGE,Long.toString(messageId));
             byte[] byteMetaData = brokerStore.get(messageMetaDataIdentifier.getBytes());
-            AndesMessageMetadata metadata = new AndesMessageMetadata(messageId,byteMetaData,true);
+            AndesMessageMetadata metadata = new AndesMessageMetadata();
+            metadata.setMessageID(messageId);
+            metadata.setMetadata(byteMetaData);
             createQueueMetaDataMapping(metadata,targetQueueName,tx);
 
             tx.commit(brokerStore);
@@ -438,6 +438,11 @@ public class FileMessageStoreImpl implements MessageStore {
             tx.put(messageDLCQueueIDIdentifier.getBytes(),dlcQueueID.getBytes());
 
             updateDLCMessageCount();
+
+            // delete metadata from current queue
+            String messageQueueIdIdentifier = generateKey(FileStoreConstants.QUEUE_ID,FileStoreConstants.MESSAGE,Long.toString(messageId));
+            long queueID = Long.parseLong(asString(brokerStore.get(messageQueueIdIdentifier.getBytes())));
+            deleteMessageFromQueue(messageId,getQueueName(queueID),tx);
 
             tx.commit(brokerStore);
 
@@ -482,19 +487,53 @@ public class FileMessageStoreImpl implements MessageStore {
     @Override //(Implemented)
     public void updateMetadataInformation(String currentQueueName, List<AndesMessageMetadata> metadataList) throws AndesException {
 
-        for (AndesMessageMetadata metadata: metadataList) {
+        Transaction tx = new Transaction(brokerStore);
 
-            long messageID = metadata.getMessageID();
-            String storageQueueName = metadata.getStorageQueueName();
-            byte[] byteMetaData = metadata.getMetadata();
+        try {
 
-            //adding new metadata
-            String messageMetaDataIdentifier = generateKey(FileStoreConstants.MESSAGE_METADA,FileStoreConstants.MESSAGE,Long.toString(messageID));
-            brokerStore.put(messageMetaDataIdentifier.getBytes(),byteMetaData);
+            for (AndesMessageMetadata metadata: metadataList) {
 
-            //changing the queue
-            moveMetadataToQueue(messageID,currentQueueName,storageQueueName);
+                long messageID = metadata.getMessageID();
+                String storageQueueName = metadata.getStorageQueueName();
+                byte[] byteMetaData = metadata.getMetadata();
+
+                //adding new metadata
+                String messageMetaDataIdentifier = generateKey(FileStoreConstants.MESSAGE_METADA,FileStoreConstants.MESSAGE,Long.toString(messageID));
+                tx.put(messageMetaDataIdentifier.getBytes(),byteMetaData);
+
+                //changing the queue
+                updateMetaDdataInfoInQueue(metadata,currentQueueName, tx);
+            }
+
+            tx.commit(brokerStore);
+
+        }catch (Exception e){
+
+            tx.rollback(brokerStore);
+            log.warn("Message moving to DLC failed",e);
+
+        }finally {
+
+            tx.close();
         }
+
+    }
+
+    //added
+    public void updateMetaDdataInfoInQueue(AndesMessageMetadata metadata, String currentQueueName, Transaction tx){
+
+        Long messageId = metadata.getMessageID();
+        String targetQueueName = metadata.getStorageQueueName();
+
+        //updating queue_id in message metadata
+        String messageQueueIDIdentifier = generateKey(FileStoreConstants.QUEUE_ID,FileStoreConstants.MESSAGE,Long.toString(messageId));
+        tx.put(messageQueueIDIdentifier.getBytes(),getQueueID(targetQueueName).getBytes());
+
+        // delete message from current queue
+        deleteMessageFromQueue(messageId,currentQueueName,tx);
+
+        // add message to the target queue
+        createQueueMetaDataMapping(metadata,targetQueueName,tx);
     }
 
     @Override //(Implemented)
@@ -524,7 +563,7 @@ public class FileMessageStoreImpl implements MessageStore {
 
                 String key = asString(keyIterator.peekNext().getKey());
 
-                String[] keySplit = key.split("\\.");
+                String[] keySplit = key.split(FileStoreConstants.CONNECTOR);
 
                 if(!keySplit[keySplit.length-1].equals(FileStoreConstants.MESSAGE_METADA)){
                     break;
@@ -580,11 +619,13 @@ public class FileMessageStoreImpl implements MessageStore {
                 count ++;
 
                 String key = asString(keyIterator.peekNext().getKey());
-                long messageId = Long.parseLong(key.split("\\.")[2]);
+                long messageId = Long.parseLong(key.split(FileStoreConstants.CONNECTOR)[2]);
 
                 if(messageId >= lastMessageId){
                     break;
                 }
+
+                keyIterator.next();
             }
 
         }finally {
@@ -605,7 +646,7 @@ public class FileMessageStoreImpl implements MessageStore {
 
     @Override //same as getMetadataList(String storageQueueName, long firstMsgId, int limit)
     public List<AndesMessageMetadata> getMetadataList(String storageQueueName, long firstMsgId, int count) throws AndesException {
-        return null;
+        return getMetadataList(storageQueueName, firstMsgId, count);
     }
 
     @Override //(Implemented)
@@ -622,7 +663,7 @@ public class FileMessageStoreImpl implements MessageStore {
             while (keyIterator.hasNext()){
 
                 String key = asString(keyIterator.peekNext().getKey());
-                String[] keySplit = key.split("\\.");
+                String[] keySplit = key.split(FileStoreConstants.CONNECTOR);
 
                 if(!keySplit[keySplit.length-1].equals(FileStoreConstants.MESSAGE_METADA)){
                     break;
@@ -679,7 +720,7 @@ public class FileMessageStoreImpl implements MessageStore {
             while (keyIterator.hasNext()){
 
                 String key = asString(keyIterator.peekNext().getKey());
-                String[] keySplit = key.split("\\.");
+                String[] keySplit = key.split(FileStoreConstants.CONNECTOR);
 
                 if(!keySplit[keySplit.length-1].equals(FileStoreConstants.MESSAGE_METADA)){
                     break;
@@ -751,7 +792,7 @@ public class FileMessageStoreImpl implements MessageStore {
         for(AndesMessageMetadata metadata : messagesToRemove){
 
             long messageID = metadata.getMessageID();
-            String storageQueueName = metadata.getDestination();
+            String storageQueueName = metadata.getStorageQueueName();
 
             Transaction tx = new Transaction(brokerStore);
 
@@ -759,6 +800,13 @@ public class FileMessageStoreImpl implements MessageStore {
 
                 deleteMessageMetaData(messageID,tx);
                 deleteMessageFromQueue(messageID,storageQueueName,tx);
+
+                // delete message from DLC if it in DLC
+                String messageDLCQueueIdIdentifier = generateKey(FileStoreConstants.DLC_QUEUE_ID,FileStoreConstants.MESSAGE,Long.toString(messageID));
+
+                if(Long.parseLong(asString(brokerStore.get(messageDLCQueueIdIdentifier.getBytes()))) != -1){
+                    deleteMessageFromQueue(messageID,FileStoreConstants.DLC,tx);
+                }
 
                 tx.commit(brokerStore);
 
@@ -784,10 +832,21 @@ public class FileMessageStoreImpl implements MessageStore {
 
             try {
 
+                //delete message metadata
                 deleteMessageMetaData(messageID,tx);
-                // TODO : remove message from queue when message_id is given
-                //String queueMessageMetaDataIdentifier = FileStoreConstants.generateKey(FileStoreConstants.MESSAGE_METADA,storageQueueName,Long.toString(metadata.getMessageID()));
-                //batch.delete(queueMessageMetaDataIdentifier.getBytes());
+
+                // delete message from queue
+                String messageQueueIdIdentifier = generateKey(FileStoreConstants.QUEUE_ID,FileStoreConstants.MESSAGE,Long.toString(messageID));
+                String storageQueueName = getQueueName(Long.parseLong(asString(brokerStore.get(messageQueueIdIdentifier.getBytes()))));
+
+                deleteMessageFromQueue(messageID,storageQueueName,tx);
+
+                // delete message from DLC if it in DLC
+                String messageDLCQueueIdIdentifier = generateKey(FileStoreConstants.DLC_QUEUE_ID,FileStoreConstants.MESSAGE,Long.toString(messageID));
+
+                if(Long.parseLong(asString(brokerStore.get(messageDLCQueueIdIdentifier.getBytes()))) != -1){
+                    deleteMessageFromQueue(messageID,FileStoreConstants.DLC,tx);
+                }
 
                 tx.commit(brokerStore);
 
@@ -815,7 +874,7 @@ public class FileMessageStoreImpl implements MessageStore {
             while (keyIterator.hasNext()){
 
                 String key = asString(keyIterator.peekNext().getKey());
-                Long currentID = Long.parseLong(key.split("\\.")[1]);
+                Long currentID = Long.parseLong(key.split(FileStoreConstants.CONNECTOR)[1]);
 
                 if(currentID!=messageID){
                     break;
@@ -868,13 +927,11 @@ public class FileMessageStoreImpl implements MessageStore {
         for (AndesMessageMetadata metadata: messagesToRemove) {
 
             long messageID = metadata.getMessageID();
-            String storageQueueName = metadata.getDestination();
 
             Transaction tx = new Transaction(brokerStore);
 
             try {
                 deleteMessageMetaData(messageID,tx);
-                deleteMessageFromQueue(messageID,storageQueueName,tx);
                 deleteMessageFromQueue(messageID,FileStoreConstants.DLC,tx);
 
                 tx.commit(brokerStore);
@@ -925,7 +982,7 @@ public class FileMessageStoreImpl implements MessageStore {
                 while (keyIterator.hasNext()){
 
                     String key = asString(keyIterator.peekNext().getKey());
-                    String[] keySplit = key.split("\\.");
+                    String[] keySplit = key.split(FileStoreConstants.CONNECTOR);
 
                     if(!keySplit[keySplit.length-1].equals(FileStoreConstants.MESSAGE_METADA)){
                         break;
@@ -989,8 +1046,13 @@ public class FileMessageStoreImpl implements MessageStore {
             while (keyIterator.hasNext()){
 
                 String key = asString(keyIterator.peekNext().getKey());
-                Long messageID = Long.parseLong(key.split("\\.")[2]);
+                String[] keySplit = key.split(FileStoreConstants.CONNECTOR);
 
+                if(!keySplit[keySplit.length-1].equals(FileStoreConstants.MESSAGE_METADA)){
+                    break;
+                }
+
+                Long messageID = Long.parseLong(keySplit[2]);
                 messageIDs.add(messageID);
 
                 keyIterator.next();
@@ -1015,7 +1077,7 @@ public class FileMessageStoreImpl implements MessageStore {
 
     @Override //(Implemented)
     public void addQueue(String storageQueueName) throws AndesException {
-        createNewQueue(storageQueueName);
+        getQueueID(storageQueueName);
     }
 
     @Override
@@ -1059,7 +1121,7 @@ public class FileMessageStoreImpl implements MessageStore {
             while (keyIterator.hasNext()){
 
                 String key = asString(keyIterator.peekNext().getKey());
-                String[] keySplit = key.split("\\.");
+                String[] keySplit = key.split(FileStoreConstants.CONNECTOR);
 
                 if(!keySplit[keySplit.length-1].equals(FileStoreConstants.MESSAGE_METADA)){
                     break;
@@ -1106,46 +1168,11 @@ public class FileMessageStoreImpl implements MessageStore {
 
         Transaction tx = new Transaction(brokerStore);
 
-        DBIterator keyIterator = brokerStore.iterator();
-        String head = generateKey(storageQueueName,FileStoreConstants.QUEUE);
-        keyIterator.seek(head.getBytes());
-
         try {
 
-            try {
-
-                while (keyIterator.hasNext()){
-
-                    String key = asString(keyIterator.peekNext().getKey());
-                    String[] keySplit = key.split("\\.");
-
-                    if(!keySplit[keySplit.length-1].equals(FileStoreConstants.MESSAGE_METADA)){
-                        break;
-                    }
-
-                    long messageID = Long.parseLong(keySplit[2]);
-
-                    deleteMessageMetaData(messageID,tx);
-                    deleteMessageFromQueue(messageID,storageQueueName,tx);
-
-                    keyIterator.next();
-
-                }
-
-            }finally {
-
-                try {
-
-                    keyIterator.close();
-
-                } catch (IOException e) {
-
-                    log.error("Error occured while closing ",e);
-
-                }
-            }
-
+            deleteAllMessagesFromQueue(storageQueueName,tx);
             deleteQueueData(storageQueueName,tx);
+
             tx.commit(brokerStore);
 
         }catch (Exception e){
@@ -1162,6 +1189,44 @@ public class FileMessageStoreImpl implements MessageStore {
 
     //added
 
+    public void deleteAllMessagesFromQueue(String storageQueueName, Transaction tx){
+
+        DBIterator keyIterator = brokerStore.iterator();
+        String head = generateKey(storageQueueName,FileStoreConstants.QUEUE);
+        keyIterator.seek(head.getBytes());
+
+        try {
+
+            while (keyIterator.hasNext()){
+
+                String key = asString(keyIterator.peekNext().getKey());
+                String[] keySplit = key.split(FileStoreConstants.CONNECTOR);
+
+                if(!keySplit[keySplit.length-1].equals(FileStoreConstants.MESSAGE_METADA)){
+                    break;
+                }
+
+                long messageID = Long.parseLong(keySplit[2]);
+
+                deleteMessageMetaData(messageID,tx);
+                deleteMessageFromQueue(messageID,storageQueueName,tx);
+
+                keyIterator.next();
+
+            }
+
+        }finally {
+
+            try {
+                keyIterator.close();
+            } catch (IOException e) {
+                log.error("Error occured while closing ",e);
+            }
+        }
+    }
+
+    //added
+
     public void deleteQueueData(String storageQueueName, Transaction tx){
 
         String queueNameIdentifier = generateKey(FileStoreConstants.QUEUE_NAME,FileStoreConstants.QUEUE,getQueueID(storageQueueName));
@@ -1173,7 +1238,7 @@ public class FileMessageStoreImpl implements MessageStore {
         tx.delete(queueMessageCountIdentifier.getBytes());
 
         this.lastQueueID--;
-        setLastQueueID(tx);
+        tx.put(FileStoreConstants.LAST_QUEUE_ID.getBytes(),Long.toString(this.lastQueueID).getBytes());
     }
 
     @Override
@@ -1273,12 +1338,11 @@ public class FileMessageStoreImpl implements MessageStore {
     //added
     public  static String generateKey(String suffix, String prefix, String... identifiers){
 
-        String regex = ".";
 
         for (String identifier: identifiers) {
-            prefix = prefix + regex + identifier; // TODO change "." to ":" or "#" which are not used in AMQP queue naming
+            prefix = prefix + FileStoreConstants.CONNECTOR + identifier; // TODO change "." to ":" or "#" which are not used in AMQP queue naming
         }
 
-        return prefix + regex + suffix;
+        return prefix + FileStoreConstants.CONNECTOR + suffix;
     }
 }

@@ -5,7 +5,7 @@ package org.wso2.andes.store.file;
  */
 public class FileStoreConstants {
 
-    public static final String REGEX = ":";
+    public static final String CONNECTOR = "::";
 
     // new suffixes for key schema
 
