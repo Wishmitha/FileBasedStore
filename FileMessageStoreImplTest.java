@@ -1,6 +1,7 @@
 package org.wso2.broker.test;
 
-import com.gs.collections.impl.list.mutable.primitive.LongArrayList;
+//import com.gs.collections.impl.list.mutable.primitive.LongArrayList;
+//import org.apache.commons.io.FileUtils;
 import org.testng.annotations.Test;
 import org.wso2.andes.kernel.AndesException;
 import org.wso2.andes.kernel.AndesMessage;
@@ -8,6 +9,8 @@ import org.wso2.andes.kernel.AndesMessageMetadata;
 import org.wso2.andes.kernel.AndesMessagePart;
 import org.wso2.andes.store.file.FileMessageStoreImpl;
 
+//import java.io.File;
+//import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
@@ -25,10 +28,10 @@ public class FileMessageStoreImplTest {
     ArrayList<AndesMessageMetadata> trialqueue = new ArrayList<>();
     ArrayList<AndesMessageMetadata> deadletterchannel = new ArrayList<>();
 
-    @Test
+    @Test(priority = 0)
     public void initializeMessageStore() throws AndesException {
         fileStore.initializeMessageStore(null , null);
-        logger.info("LevelDB store initialized.");
+        logger.info("DB store initialized.");
     }
 
     @Test(priority = 1)
@@ -48,31 +51,7 @@ public class FileMessageStoreImplTest {
 
         fileStore.storeMessages(messagestoStore);
     }
-
-/*    @Test(priority = 1)
-    public void storeMessageRollBack() throws AndesException {
-        List<AndesMessage> messagestoStore = new ArrayList<AndesMessage>();
-
-        AndesMessage message = this.createMessage("testqueue" , true);
-        messagestoStore.add(message);
-
-        fileStore.storeMessages(messagestoStore);
-    }
-
-    @Test(priority = 1)
-    public void storeMessagesRollBack() throws AndesException {
-        List<AndesMessage> messagestoStore = new ArrayList<AndesMessage>();
-
-        for (int i = 0; i < 9; i++) {
-            AndesMessage message = this.createMessage("testqueue" , false);
-        }
-
-        AndesMessage message = this.createMessage("testqueue" , true);
-        messagestoStore.add(message);
-
-        fileStore.storeMessages(messagestoStore);
-    }*/
-
+/*
     @Test(priority = 1)
     public void addQueue() throws AndesException {
         fileStore.addQueue("trialqueue");
@@ -168,9 +147,9 @@ public class FileMessageStoreImplTest {
             logger.info("Message " + metadata.getMessageID() + " is removed.");
         }
         fileStore.deleteMessageMetadataFromQueue("testqueue" , messagesToRemove);
-    }
+    }*/
 
-    @Test(priority = 4)
+    /*@Test(priority = 4)
     public void deleteMessages() throws AndesException {
         List<AndesMessageMetadata> messagesToRemove = new ArrayList<>();
 
@@ -255,12 +234,17 @@ public class FileMessageStoreImplTest {
         logger.info("deadletter channel is cleared. " + messageCount + " messages have been removed.");
     }
 
-    @Test(priority = 10)
+    @Test(priority = 7)
     public void displayQueueMessageCount() {
         logger.info("testqueue : " + Integer.toString(testqueue.size()));
         logger.info("trialqueue : " + Integer.toString(trialqueue.size()));
         logger.info("deadletterchannel : " + Integer.toString(deadletterchannel.size()));
     }
+
+    @Test(priority = 8)
+    public void removeLevelDBStore() throws IOException {
+        FileUtils.deleteDirectory(new File("mbstore"));
+    }*/
 
 
 
@@ -279,7 +263,7 @@ public class FileMessageStoreImplTest {
         }
 
         AndesMessagePart messagePart = new AndesMessagePart();
-        messagePart.setData(("Message " + Long.toString(messageID) + "for " + storageQueueName).getBytes());
+        messagePart.setData(("Message " + Long.toString(messageID) + " for " + storageQueueName).getBytes());
         messagePart.setOffSet(0);
         messagePart.setMessageID(messageID);
         chunkList.add(messagePart);

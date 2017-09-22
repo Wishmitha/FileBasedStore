@@ -5,6 +5,14 @@ package org.wso2.andes.store.file;
  */
 public class FileStoreConstants {
 
+    public static final String BLOCK_RESTART_INTERVAL = "blockRestartInterval";
+    public static final String BLOCK_SIZE = "blockSize";
+    public static final String CACHE_SIZE = "cacheSize";
+    public static final String MAX_OPEN_FILES = "maxOpenFiles";
+    public static final String WRITE_BUFFER_SIZE = "writeBufferSize";
+
+    public static final String BROKER_STORE = "mbstore";
+
     public static final String CONNECTOR = "::";
 
     // new suffixes for key schema

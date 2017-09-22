@@ -14,7 +14,6 @@ import java.util.Map;
 public class Transaction {
 
     private WriteBatch batch;
-    boolean isCommited;
 
     private static final Logger log = Logger.getLogger(Transaction.class);
 
@@ -24,23 +23,12 @@ public class Transaction {
         this.batch = db.createWriteBatch();
     }
 
-    public void close() {
-        try {
-            this.batch.close();
-        } catch (IOException e) {
-            log.error("Error occured while closing ",e);
-        }
+    public void put(byte[] key, byte[] value){
+        this.batch.put(key,value);
     }
 
-    public void commit(DB db){
-        db.write(this.batch);
-        this.isCommited = true;
-    }
-
-    public void rollback(DB db) {
-        this.updates = new HashMap<String, byte[]>();
-        this.batch = db.createWriteBatch();
-        this.isCommited = false;
+    public void delete(byte[] key){
+        this.batch.delete(key);
     }
 
     public void setKey(String key, byte[] value){
@@ -52,12 +40,16 @@ public class Transaction {
         return updates.get(key);
     }
 
-    public void put(byte[] key, byte[] value){
-        this.batch.put(key,value);
+    public void commit(DB db){
+        db.write(this.batch);
     }
 
-    public void delete(byte[] key){
-        this.batch.delete(key);
+    public void close() {
+        try {
+            this.batch.close();
+        } catch (IOException e) {
+            log.error("Error occured while closing ",e);
+        }
     }
 
 }
